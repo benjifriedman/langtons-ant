@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Langton's Ant Simulator</title>
+    <style>
+      /*        * {
+            font-family: sans-serif;
+        }*/
+      canvas {
+        border: 1px solid black;
+      }
+    </style>
+  </head>
+  <body>
+    <canvas id="langtonsAnt" width="500" height="500"></canvas>
+    <div>
+      <button id="pausePlayButton">Start</button>
+      <span id="stepCounter">Steps: 0</span>
+    </div>
+    <div>
+      <h3 style="margin-bottom: 0">Colors and Rules</h3>
+      <p style="margin-top: 0">
+        (The first instruction is also the background color)
+      </p>
+      <div id="colorRules"></div>
+      <button id="addColorButton">Add Color</button>
+    </div>
+    <div>
+      <h3>Jump to step</h3>
+      <input type="number" id="stepInput" min="0" value="0" />
+      <button id="jumpToStepButton">
+        Go to this many steps with the current Colors and Rules
+      </button>
+    </div>
+    <div>
+      <h3>Zoom level</h3>
+      <select id="zoomLevelSelect">
+        <option value="0.5">0.5x</option>
+        <option value="1" selected>1x</option>
+        <option value="2">2x</option>
+        <option value="3">3x</option>
+        <option value="4">4x</option>
+        <option value="5">5x</option>
+      </select>
+    </div>
+
+    <script>
+      const canvas = document.getElementById("langtonsAnt");
+      const ctx = canvas.getContext("2d");
+      let zoomLevel = 1;
+      let cellSize = 5 * zoomLevel;
+      const width = canvas.width / cellSize;
+      const height = canvas.height / cellSize;
+
+      const grid = Array.from({ length: width }, () =>
+        Array.from({ length: height }, () => 0)
+      );
+
+      let antX = Math.floor(width / 2);
+      let antY = Math.floor(height / 2);
+      let antDirection = 0; // 0: up, 1: right, 2: down, 3: left
+      let stepCounter = 0;
+      let isPaused = false;
+
+      const pausePlayButton = document.getElementById("pausePlayButton");
+      const stepCounterElement = document.getElementById("stepCounter");
+      const addColorButton = document.getElementById("addColorButton");
+      const colorRules = document.getElementById("colorRules");
+      const stepInput = document.getElementById("stepInput");
+      const jumpToStepButton = document.getElementById("jumpToStepButton");
+
+      const rules = [
+        { color: "white", turn: "left" },
+        { color: "black", turn: "right" },
+      ];
+
+      function createColorRule(index) {
+        const colorContainer = document.createElement("div");
+
+        const colorInput = document.createElement("input");
+        colorInput.type = "color";
+        colorContainer.appendChild(colorInput);
+
+        const turnSelect = document.createElement("select");
+        const leftOption = document.createElement("option");
+        leftOption.value = "left";
+        leftOption.text = "Turn Left";
+        const rightOption = document.createElement("option");
+        rightOption.value = "right";
+        rightOption.text = "Turn Right";
+        turnSelect.add(leftOption);
+        turnSelect.add(rightOption);
+        colorContainer.appendChild(turnSelect);
+
+        colorInput.addEventListener("change", () => {
+          rules[colorContainer.dataset.index].color = colorInput.value;
+        });
+
+        turnSelect.addEventListener("change", () => {
+          rules[colorContainer.dataset.index].turn = turnSelect.value;
+        });
+
+        colorContainer.dataset.index = index;
+        colorRules.appendChild(colorContainer);
+
+        function toHexColor(color) {
+          const ctx = document.createElement("canvas").getContext("2d");
+          ctx.fillStyle = color;
+          return ctx.fillStyle;
+        }
+
+        // Set the initial values after the event listeners have been added.
+        colorInput.value = toHexColor(rules[index].color);
+        turnSelect.value = rules[index].turn;
+      }
+
+      addColorButton.addEventListener("click", () => {
+        const newRule = { color: "black", turn: "left" };
+        rules.push(newRule);
+        createColorRule(rules.length - 1);
+      });
+
+      let isStarted = false;
+      isPaused = true;
+
+      pausePlayButton.addEventListener("click", () => {
+        if (!isStarted) {
+          isStarted = true;
+          loop();
+        }
+        isPaused = !isPaused;
+        pausePlayButton.innerText = isPaused ? "Play" : "Pause";
+      });
+
+      function step() {
+        const cellValue = grid[antX][antY];
+        const rule = rules[cellValue];
+
+        grid[antX][antY] = (cellValue + 1) % rules.length;
+
+        if (rule.turn === "right") {
+          antDirection = (antDirection + 1) % 4;
+        } else {
+          antDirection = (antDirection - 1 + 4) % 4;
+        }
+
+        switch (antDirection) {
+          case 0:
+            antY--;
+            break;
+          case 1:
+            antX++;
+            break;
+          case 2:
+            antY++;
+            break;
+          case 3:
+            antX--;
+            break;
+        }
+
+        antX = (antX + width) % width;
+        antY = (antY + height) % height;
+
+        stepCounter++;
+        stepCounterElement.innerText = `Steps: ${stepCounter}`;
+      }
+
+      function draw() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+        const visibleWidth = Math.ceil(canvas.width / cellSize);
+        const visibleHeight = Math.ceil(canvas.height / cellSize);
+
+        const offsetX = Math.floor((width - visibleWidth) / 2) * cellSize;
+        const offsetY = Math.floor((height - visibleHeight) / 2) * cellSize;
+
+        for (let x = 0; x < visibleWidth; x++) {
+          for (let y = 0; y < visibleHeight; y++) {
+            const gridX = x + Math.floor(offsetX / cellSize);
+            const gridY = y + Math.floor(offsetY / cellSize);
+            if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
+              ctx.fillStyle = rules[grid[gridX][gridY]].color;
+              ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
+            }
+          }
+        }
+
+        ctx.fillStyle = "red";
+        ctx.fillRect(
+          (antX - Math.floor(offsetX / cellSize)) * cellSize,
+          (antY - Math.floor(offsetY / cellSize)) * cellSize,
+          cellSize,
+          cellSize
+        );
+      }
+
+      jumpToStepButton.addEventListener("click", () => {
+        isPaused = true;
+        pausePlayButton.innerText = "Play";
+
+        const targetStep = parseInt(stepInput.value);
+        if (isNaN(targetStep) || targetStep < 0) {
+          alert("Please enter a valid step number.");
+          return;
+        }
+
+        resetGrid();
+        stepCounter = 0;
+
+        while (stepCounter < targetStep) {
+          step();
+        }
+        draw();
+      });
+
+      zoomLevelSelect.addEventListener("change", () => {
+        zoomLevel = parseFloat(zoomLevelSelect.value);
+        cellSize = Math.floor(5 * zoomLevel);
+        draw();
+      });
+
+      function resetGrid() {
+        for (let x = 0; x < width; x++) {
+          for (let y = 0; y < height; y++) {
+            grid[x][y] = 0;
+          }
+        }
+        antX = Math.floor(width / 2);
+        antY = Math.floor(height / 2);
+        antDirection = 0;
+      }
+
+      function loop() {
+        if (!isPaused) {
+          step();
+          draw();
+        }
+        requestAnimationFrame(loop);
+      }
+
+      // rules.forEach(() => createColorRule());
+
+      for (let i = 0; i < rules.length; i++) {
+        createColorRule(i);
+      }
+
+      // loop();
+    </script>
+  </body>
+</html>
