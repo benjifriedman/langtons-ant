@@ -5,9 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Langton's Ant Simulator</title>
     <style>
-      /*        * {
+        html {
             font-family: sans-serif;
-        }*/
+        }
       canvas {
         border: 1px solid black;
       }
@@ -19,6 +19,10 @@
       <button id="pausePlayButton">Start</button>
       <span id="stepCounter">Steps: 0</span>
     </div>
+    <!-- <div id="stepButtonsContainer" style="margin: 8px 0;">
+      <button id="stepBackwardButton">Step Backward</button>
+      <button id="stepForwardButton">Step Forward</button>
+    </div> -->
     <div>
       <h3 style="margin-bottom: 0">Colors and Rules</h3>
       <p style="margin-top: 0">
@@ -38,18 +42,18 @@
       <h3>Zoom level</h3>
       <select id="zoomLevelSelect">
         <option value="0.5">0.5x</option>
-        <option value="1" selected>1x</option>
+        <option value="1" >1x</option>
         <option value="2">2x</option>
         <option value="3">3x</option>
         <option value="4">4x</option>
-        <option value="5">5x</option>
+        <option value="5" selected>5x</option>
       </select>
     </div>
 
     <script>
       const canvas = document.getElementById("langtonsAnt");
       const ctx = canvas.getContext("2d");
-      let zoomLevel = 1;
+      let zoomLevel = 5;
       let cellSize = 5 * zoomLevel;
       const width = canvas.width / cellSize;
       const height = canvas.height / cellSize;
@@ -63,6 +67,14 @@
       let antDirection = 0; // 0: up, 1: right, 2: down, 3: left
       let stepCounter = 0;
       let isPaused = false;
+      let history = [];
+
+      // 1. Add pan state variables near your other state variables:
+      let panOffsetX = 0; // in grid cells
+      let panOffsetY = 0; // in grid cells
+      let isPanning = false;
+      let panStart = { x: 0, y: 0 };
+      let panOffsetStart = { x: 0, y: 0 };
 
       const pausePlayButton = document.getElementById("pausePlayButton");
       const stepCounterElement = document.getElementById("stepCounter");
@@ -71,6 +83,24 @@
       const stepInput = document.getElementById("stepInput");
       const jumpToStepButton = document.getElementById("jumpToStepButton");
 
+      // Add step buttons dynamically
+      const stepButtonsContainer = document.createElement("div");
+      stepButtonsContainer.style.margin = "8px 0";
+      const stepBackwardButton = document.createElement("button");
+      stepBackwardButton.id = "stepBackwardButton";
+      stepBackwardButton.innerText = "Step Backward";
+      const stepForwardButton = document.createElement("button");
+      stepForwardButton.id = "stepForwardButton";
+      stepForwardButton.innerText = "Step Forward";
+      stepButtonsContainer.appendChild(stepBackwardButton);
+      stepButtonsContainer.appendChild(stepForwardButton);
+
+      // Insert after the play/pause div
+      pausePlayButton.parentNode.parentNode.insertBefore(
+        stepButtonsContainer,
+        pausePlayButton.parentNode.nextSibling
+      );
+
       const rules = [
         { color: "white", turn: "left" },
         { color: "black", turn: "right" },
@@ -78,52 +108,173 @@
 
       function createColorRule(index) {
         const colorContainer = document.createElement("div");
+        colorContainer.style.display = "flex";
+        colorContainer.style.alignItems = "center";
+        colorContainer.style.marginBottom = "8px";
 
+        // "On" label
+        const onLabel = document.createElement("span");
+        onLabel.innerText = "On";
+        onLabel.style.marginRight = "6px";
+        colorContainer.appendChild(onLabel);
+
+        // Color input
         const colorInput = document.createElement("input");
         colorInput.type = "color";
+        colorInput.style.marginRight = "6px";
         colorContainer.appendChild(colorInput);
 
+        // "Turn" label
+        const turnLabel = document.createElement("span");
+        turnLabel.innerText = "Turn";
+        turnLabel.style.marginRight = "6px";
+        colorContainer.appendChild(turnLabel);
+
+        // Turn select
         const turnSelect = document.createElement("select");
         const leftOption = document.createElement("option");
         leftOption.value = "left";
-        leftOption.text = "Turn Left";
+        leftOption.text = "Left";
         const rightOption = document.createElement("option");
         rightOption.value = "right";
-        rightOption.text = "Turn Right";
+        rightOption.text = "Right";
         turnSelect.add(leftOption);
         turnSelect.add(rightOption);
+        turnSelect.style.marginRight = "6px";
         colorContainer.appendChild(turnSelect);
 
-        colorInput.addEventListener("change", () => {
-          rules[colorContainer.dataset.index].color = colorInput.value;
+        // "Paint" label
+        const paintLabel = document.createElement("span");
+        paintLabel.innerText = "Paint";
+        paintLabel.style.marginRight = "6px";
+        colorContainer.appendChild(paintLabel);
+
+        // Next color swatch
+        const nextColorSwatch = document.createElement("span");
+        nextColorSwatch.style.display = "inline-block";
+        nextColorSwatch.style.width = "24px";
+        nextColorSwatch.style.height = "24px";
+        nextColorSwatch.style.border = "1px solid #888";
+        nextColorSwatch.style.verticalAlign = "middle";
+        colorContainer.appendChild(nextColorSwatch);
+
+        // "Remove" (X) button
+        const removeButton = document.createElement("button");
+        removeButton.innerText = "❌";
+        removeButton.title = "Remove this rule";
+        removeButton.style.marginLeft = "8px";
+        removeButton.style.background = "none";
+        removeButton.style.border = "none";
+        removeButton.style.cursor = "pointer";
+        removeButton.style.fontSize = "16px";
+        removeButton.style.lineHeight = "1";
+        colorContainer.appendChild(removeButton);
+
+        removeButton.addEventListener("click", () => {
+          if (rules.length <= 1) {
+            alert("You must have at least one rule.");
+            return;
+          }
+          const idx = parseInt(colorContainer.dataset.index, 10);
+          rules.splice(idx, 1);
+          // Rebuild the rules UI
+          rebuildColorRulesUI();
+          updateAllNextColorSwatches();
         });
 
-        turnSelect.addEventListener("change", () => {
-          rules[colorContainer.dataset.index].turn = turnSelect.value;
-        });
-
-        colorContainer.dataset.index = index;
-        colorRules.appendChild(colorContainer);
-
+        // Helper to get color as hex
         function toHexColor(color) {
           const ctx = document.createElement("canvas").getContext("2d");
           ctx.fillStyle = color;
           return ctx.fillStyle;
         }
 
-        // Set the initial values after the event listeners have been added.
+        // Set initial values
         colorInput.value = toHexColor(rules[index].color);
         turnSelect.value = rules[index].turn;
+
+        // Set next color swatch
+        function updateNextColorSwatch() {
+          const nextIndex = (index + 1) % rules.length;
+          nextColorSwatch.style.background = toHexColor(rules[nextIndex].color);
+          nextColorSwatch.title = `Next: ${rules[nextIndex].color}`;
+        }
+        updateNextColorSwatch();
+
+        // Event listeners
+        colorInput.addEventListener("change", () => {
+          rules[parseInt(colorContainer.dataset.index, 10)].color = colorInput.value;
+          updateAllNextColorSwatches();
+        });
+        turnSelect.addEventListener("change", () => {
+          rules[parseInt(colorContainer.dataset.index, 10)].turn = turnSelect.value;
+        });
+
+        colorContainer.dataset.index = index;
+        colorRules.appendChild(colorContainer);
+
+        // Store reference for updating later
+        colorContainer._nextColorSwatch = nextColorSwatch;
       }
 
+      // Helper to update all next color swatches (call after any color change)
+      function updateAllNextColorSwatches() {
+        Array.from(colorRules.children).forEach((container, i) => {
+          if (container._nextColorSwatch) {
+            const nextIndex = (i + 1) % rules.length;
+            container._nextColorSwatch.style.background = rules[nextIndex].color;
+            container._nextColorSwatch.title = `Next: ${rules[nextIndex].color}`;
+          }
+        });
+      }
+
+      // Update the addColorButton event to update all swatches after adding a rule
       addColorButton.addEventListener("click", () => {
         const newRule = { color: "black", turn: "left" };
         rules.push(newRule);
-        createColorRule(rules.length - 1);
+        rebuildColorRulesUI();
       });
+
+      function rebuildColorRulesUI() {
+        colorRules.innerHTML = "";
+        for (let i = 0; i < rules.length; i++) {
+          createColorRule(i);
+        }
+        // After all rules are created, update the indices
+        Array.from(colorRules.children).forEach((container, i) => {
+          container.dataset.index = i;
+        });
+        updateAllNextColorSwatches();
+      }
 
       let isStarted = false;
       isPaused = true;
+
+      // Add after your other DOM element selections:
+      const speedControlContainer = document.createElement("div");
+      speedControlContainer.style.marginTop = "8px";
+      speedControlContainer.innerHTML = `
+        <label for="speedRange">Speed:</label>
+        <input type="range" id="speedRange" min="1" max="120" value="30" style="vertical-align: middle;">
+        <span id="speedValue">30</span> steps/sec
+      `;
+      // Insert after the play/pause button's parent div
+      pausePlayButton.parentNode.parentNode.insertBefore(
+        speedControlContainer,
+        pausePlayButton.parentNode.nextSibling
+      );
+
+      const speedRange = document.getElementById("speedRange");
+      const speedValue = document.getElementById("speedValue");
+
+      // Default speed (steps per second)
+      let speed = 30;
+
+      // Update speed when slider changes
+      speedRange.addEventListener("input", () => {
+        speed = parseInt(speedRange.value, 10);
+        speedValue.innerText = speed;
+      });
 
       pausePlayButton.addEventListener("click", () => {
         if (!isStarted) {
@@ -135,10 +286,21 @@
       });
 
       function step() {
+        // Save current state for undo
+        history.push({
+          antX,
+          antY,
+          antDirection,
+          grid: grid.map(col => col.slice()), // deep copy
+          stepCounter
+        });
         const cellValue = grid[antX][antY];
         const rule = rules[cellValue];
 
         grid[antX][antY] = (cellValue + 1) % rules.length;
+
+        // Set lastTurn before changing direction
+        lastTurn = rule.turn;
 
         if (rule.turn === "right") {
           antDirection = (antDirection + 1) % 4;
@@ -166,6 +328,7 @@
 
         stepCounter++;
         stepCounterElement.innerText = `Steps: ${stepCounter}`;
+        updateTurnIndicators();
       }
 
       function draw() {
@@ -174,13 +337,14 @@
         const visibleWidth = Math.ceil(canvas.width / cellSize);
         const visibleHeight = Math.ceil(canvas.height / cellSize);
 
-        const offsetX = Math.floor((width - visibleWidth) / 2) * cellSize;
-        const offsetY = Math.floor((height - visibleHeight) / 2) * cellSize;
+        // Centered on the ant, but add pan offset
+        const centerX = Math.floor(width / 2) + panOffsetX;
+        const centerY = Math.floor(height / 2) + panOffsetY;
 
         for (let x = 0; x < visibleWidth; x++) {
           for (let y = 0; y < visibleHeight; y++) {
-            const gridX = x + Math.floor(offsetX / cellSize);
-            const gridY = y + Math.floor(offsetY / cellSize);
+            const gridX = x + centerX - Math.floor(visibleWidth / 2);
+            const gridY = y + centerY - Math.floor(visibleHeight / 2);
             if (gridX >= 0 && gridX < width && gridY >= 0 && gridY < height) {
               ctx.fillStyle = rules[grid[gridX][gridY]].color;
               ctx.fillRect(x * cellSize, y * cellSize, cellSize, cellSize);
@@ -188,10 +352,11 @@
           }
         }
 
+        // Draw the ant
         ctx.fillStyle = "red";
         ctx.fillRect(
-          (antX - Math.floor(offsetX / cellSize)) * cellSize,
-          (antY - Math.floor(offsetY / cellSize)) * cellSize,
+          (antX - centerX + Math.floor(visibleWidth / 2)) * cellSize,
+          (antY - centerY + Math.floor(visibleHeight / 2)) * cellSize,
           cellSize,
           cellSize
         );
@@ -219,6 +384,8 @@
       zoomLevelSelect.addEventListener("change", () => {
         zoomLevel = parseFloat(zoomLevelSelect.value);
         cellSize = Math.floor(5 * zoomLevel);
+        panOffsetX = 0;
+        panOffsetY = 0;
         draw();
       });
 
@@ -231,23 +398,177 @@
         antX = Math.floor(width / 2);
         antY = Math.floor(height / 2);
         antDirection = 0;
+        lastTurn = null;
+        updateTurnIndicators();
       }
 
-      function loop() {
+      // Animation loop with speed control
+      let lastStepTime = 0;
+      function loop(timestamp) {
         if (!isPaused) {
-          step();
-          draw();
+          if (!lastStepTime) lastStepTime = timestamp;
+          const interval = 1000 / speed;
+          if (timestamp - lastStepTime >= interval) {
+            step();
+            draw();
+            lastStepTime = timestamp;
+          }
+        } else {
+          lastStepTime = 0; // reset so it doesn't "catch up" after pause
         }
         requestAnimationFrame(loop);
       }
+
+      function stepBackward() {
+        if (history.length === 0) return;
+        const prev = history.pop();
+        antX = prev.antX;
+        antY = prev.antY;
+        antDirection = prev.antDirection;
+        for (let x = 0; x < width; x++) {
+          for (let y = 0; y < height; y++) {
+            grid[x][y] = prev.grid[x][y];
+          }
+        }
+        stepCounter = prev.stepCounter;
+        stepCounterElement.innerText = `Steps: ${stepCounter}`;
+        lastTurn = null;
+        updateTurnIndicators();
+        draw();
+      }
+
+      stepForwardButton.addEventListener("click", () => {
+        step();
+        draw();
+      });
+
+      stepBackwardButton.addEventListener("click", () => {
+        stepBackward();
+      });
 
       // rules.forEach(() => createColorRule());
 
       for (let i = 0; i < rules.length; i++) {
         createColorRule(i);
       }
+      updateAllNextColorSwatches();
 
       // loop();
+
+      // --- RESET BUTTON ---
+
+      // Add the button to the DOM (e.g., after colorRules div)
+      const resetButton = document.createElement("button");
+      resetButton.innerText = "Reset";
+      resetButton.style.marginTop = "12px";
+      resetButton.style.marginLeft = "8px";
+      colorRules.parentNode.appendChild(resetButton);
+
+      resetButton.addEventListener("click", () => {
+        // Reset rules to default
+        rules.length = 0;
+        rules.push({ color: "white", turn: "left" }, { color: "black", turn: "right" });
+        rebuildColorRulesUI();
+        // Reset grid and ant
+        resetGrid();
+        stepCounter = 0;
+        stepCounterElement.innerText = `Steps: ${stepCounter}`;
+        draw();
+        panOffsetX = 0;
+        panOffsetY = 0;
+      });
+
+      // 3. Add mouse and touch event listeners for panning:
+      canvas.addEventListener("mousedown", (e) => {
+        if (zoomLevel <= 1) return; // Only allow panning when zoomed in
+        isPanning = true;
+        panStart = { x: e.clientX, y: e.clientY };
+        panOffsetStart = { x: panOffsetX, y: panOffsetY };
+      });
+
+      window.addEventListener("mousemove", (e) => {
+        if (!isPanning) return;
+        const dx = e.clientX - panStart.x;
+        const dy = e.clientY - panStart.y;
+        panOffsetX = panOffsetStart.x - Math.round(dx / cellSize);
+        panOffsetY = panOffsetStart.y - Math.round(dy / cellSize);
+        // Clamp to grid bounds
+        panOffsetX = Math.max(
+          Math.min(panOffsetX, width - 1 - Math.floor(canvas.width / cellSize / 2)),
+          -Math.floor(canvas.width / cellSize / 2)
+        );
+        panOffsetY = Math.max(
+          Math.min(panOffsetY, height - 1 - Math.floor(canvas.height / cellSize / 2)),
+          -Math.floor(canvas.height / cellSize / 2)
+        );
+        draw();
+      });
+
+      window.addEventListener("mouseup", () => {
+        isPanning = false;
+      });
+
+      // Optional: Touch support
+      canvas.addEventListener("touchstart", (e) => {
+        if (zoomLevel <= 1) return;
+        isPanning = true;
+        const touch = e.touches[0];
+        panStart = { x: touch.clientX, y: touch.clientY };
+        panOffsetStart = { x: panOffsetX, y: panOffsetY };
+      });
+
+      window.addEventListener("touchmove", (e) => {
+        if (!isPanning) return;
+        const touch = e.touches[0];
+        const dx = touch.clientX - panStart.x;
+        const dy = touch.clientY - panStart.y;
+        panOffsetX = panOffsetStart.x - Math.round(dx / cellSize);
+        panOffsetY = panOffsetStart.y - Math.round(dy / cellSize);
+        // Clamp as above
+        panOffsetX = Math.max(
+          Math.min(panOffsetX, width - 1 - Math.floor(canvas.width / cellSize / 2)),
+          -Math.floor(canvas.width / cellSize / 2)
+        );
+        panOffsetY = Math.max(
+          Math.min(panOffsetY, height - 1 - Math.floor(canvas.height / cellSize / 2)),
+          -Math.floor(canvas.height / cellSize / 2)
+        );
+        draw();
+      });
+
+      window.addEventListener("touchend", () => {
+        isPanning = false;
+      });
+
+      // Add UI Elements
+      const turnIndicators = document.createElement("div");
+      turnIndicators.style.margin = "8px 0";
+      const lastTurnIndicator = document.createElement("span");
+      lastTurnIndicator.id = "lastTurnIndicator";
+      lastTurnIndicator.innerText = "Last turn: N/A";
+      const nextTurnIndicator = document.createElement("span");
+      nextTurnIndicator.id = "nextTurnIndicator";
+      nextTurnIndicator.innerText = "Next turn: N/A";
+      turnIndicators.appendChild(lastTurnIndicator);
+      turnIndicators.appendChild(document.createTextNode(" | "));
+      turnIndicators.appendChild(nextTurnIndicator);
+      canvas.parentNode.insertBefore(turnIndicators, canvas.nextSibling);
+
+      // Track and Update the Indicators
+      let lastTurn = null; // "left" or "right"
+
+      function updateTurnIndicators() {
+        // Last turn
+        lastTurnIndicator.innerText = "Last turn: " + (lastTurn ? lastTurn.charAt(0).toUpperCase() + lastTurn.slice(1) : "N/A");
+
+        // Next turn (what will happen if step() is called now)
+        const cellValue = grid[antX][antY];
+        const rule = rules[cellValue];
+        nextTurnIndicator.innerText = "Next turn: " + (rule.turn.charAt(0).toUpperCase() + rule.turn.slice(1));
+      }
+
+      // Call updateTurnIndicators() after every step, backward step, and reset
+      // This is already done in step() and stepBackward()
     </script>
   </body>
 </html>
